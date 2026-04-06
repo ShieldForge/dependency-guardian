@@ -1,0 +1,181 @@
+{
+  "name": "dependency-guardian",
+  "displayName": "Dependency Guardian",
+  "description": "Security proxy for package managers - blocks vulnerable and malicious dependencies before they reach your project.",
+  "version": "0.1.0",
+  "publisher": "dependency-guardian",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=25.0.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dependencyGuardian.start",
+        "title": "Dependency Guardian: Start Proxy"
+      },
+      {
+        "command": "dependencyGuardian.stop",
+        "title": "Dependency Guardian: Stop Proxy"
+      },
+      {
+        "command": "dependencyGuardian.showDashboard",
+        "title": "Dependency Guardian: Show Dashboard"
+      },
+      {
+        "command": "dependencyGuardian.configureNpm",
+        "title": "Dependency Guardian: Configure npm to Use Proxy"
+      },
+      {
+        "command": "dependencyGuardian.configurePip",
+        "title": "Dependency Guardian: Configure pip to Use Proxy"
+      },
+      {
+        "command": "dependencyGuardian.configureGo",
+        "title": "Dependency Guardian: Configure Go to Use Proxy"
+      },
+      {
+        "command": "dependencyGuardian.configureMaven",
+        "title": "Dependency Guardian: Configure Maven to Use Proxy"
+      },
+      {
+        "command": "dependencyGuardian.refreshDecisions",
+        "title": "Dependency Guardian: Refresh Decisions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dependencyGuardian.clearDecisions",
+        "title": "Dependency Guardian: Clear Decision View"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dependencyGuardian",
+          "title": "Dependency Guardian",
+          "icon": "$(shield)"
+        }
+      ]
+    },
+    "views": {
+      "dependencyGuardian": [
+        {
+          "id": "dependencyGuardian.status",
+          "name": "Proxy Status"
+        },
+        {
+          "id": "dependencyGuardian.decisions",
+          "name": "Recent Decisions"
+        },
+        {
+          "id": "dependencyGuardian.denied",
+          "name": "Blocked Packages"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "dependencyGuardian.refreshDecisions",
+          "when": "view == dependencyGuardian.decisions || view == dependencyGuardian.denied",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Dependency Guardian",
+      "properties": {
+        "dependencyGuardian.connectionMode": {
+          "type": "string",
+          "enum": [
+            "local",
+            "hosted"
+          ],
+          "default": "local",
+          "enumDescriptions": [
+            "Launch and manage a local guardian binary",
+            "Connect to an already-running guardian service (local or remote)"
+          ],
+          "description": "How to connect to the Dependency Guardian proxy."
+        },
+        "dependencyGuardian.hostedUrl": {
+          "type": "string",
+          "default": "",
+          "description": "URL of the hosted guardian service (e.g. http://guardian.internal:8080). Only used when connectionMode is 'hosted'."
+        },
+        "dependencyGuardian.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the guardian binary. Leave empty to use the bundled binary or search PATH. Only used when connectionMode is 'local'."
+        },
+        "dependencyGuardian.listenPort": {
+          "type": "number",
+          "default": 8080,
+          "description": "Port for the proxy server to listen on. Only used when connectionMode is 'local'."
+        },
+        "dependencyGuardian.configDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the configuration directory. Leave empty to use bundled defaults. Only used when connectionMode is 'local'."
+        },
+        "dependencyGuardian.policiesDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the OPA/Rego policies directory. Leave empty to use bundled defaults. Only used when connectionMode is 'local'."
+        },
+        "dependencyGuardian.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start the proxy (local mode) or connect to the hosted service when VS Code opens."
+        },
+        "dependencyGuardian.autoStopOnClose": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically stop the local guardian process when VS Code closes. Set to false to keep it running (e.g. for background vulnerability database syncing). Only applies when connectionMode is 'local'."
+        },
+        "dependencyGuardian.vulndbEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the local vulnerability database (SQLite)."
+        },
+        "dependencyGuardian.refreshInterval": {
+          "type": "number",
+          "default": 3,
+          "description": "How often (in seconds) to poll for new decisions."
+        }
+      }
+    }
+  },
+  "lint-staged": {
+    "**/*.{js,jsx,ts,tsx,json,css,md}": "prettier --write"
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "npx prettier --write \"**/*.{js,jsx,ts,tsx,json,css,md}\" && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "npx eslint src && npx prettier --write \"**/*.{js,jsx,ts,tsx,json,css,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "bash scripts/package.sh",
+    "package:all": "bash scripts/package.sh --all",
+    "package:universal": "bash scripts/package.sh --universal"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^10.2.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.58.0",
+    "vitest": "^4.1.2"
+  }
+}

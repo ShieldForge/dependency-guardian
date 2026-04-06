@@ -1,0 +1,45 @@
+# dependency-guardian configuration
+server:
+  listen_addr: ":8080"
+  read_timeout: 30s
+  write_timeout: 60s
+  max_request_body: 10485760 # 10 MB
+
+upstreams:
+  npm: "https://registry.npmjs.org"
+  pypi: "https://pypi.org"
+  go: "https://proxy.golang.org"
+  maven: "https://repo1.maven.org/maven2"
+
+policies:
+  directory: "./policies"
+
+logging:
+  level: "info" # debug, info, warn, error
+  format: "text" # text, json
+
+# Vulnerability database (OSV)
+vulndb:
+  enabled: true # set to true to enable
+  driver: "sqlite" # "sqlite" or "postgres"
+  dsn: "./vulndb.sqlite" # file path for sqlite, or postgres connection string
+  # dsn: "host=localhost user=guardian password=secret dbname=guardian sslmode=disable"
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 1h
+  log_level: "warn" # silent, error, warn, info
+
+# OSV data synchronisation
+sync:
+  enabled: true # set to true to enable background sync
+  seed_on_start: true # run a full sync when the server starts
+  ecosystems: # empty = defaults to npm, PyPI, Go, Maven
+    - "npm"
+    - "PyPI"
+    - "Go"
+    - "Maven"
+  full_sync_interval: 24h # how often to do a full reseed
+  delta_sync_interval: 15m # how often to check for delta updates
+  metrics_interval: 1h # how often to recalculate metrics
+  batch_size: 100
+  workers: 2

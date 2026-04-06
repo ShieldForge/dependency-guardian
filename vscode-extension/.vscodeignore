@@ -1,0 +1,24 @@
+# Source & dev files (not needed at runtime)
+.vscode-test/
+.vscode/
+src/
+scripts/
+tsconfig.json
+vitest.config.ts
+eslint.config.mjs
+.eslintrc*
+*.map
+
+# Docs
+CHANGELOG.md
+
+# Test & config files
+**/*.test.ts
+**/*.test.js
+**/__mocks__/
+
+# Dev dependencies are not bundled
+node_modules/
+
+# Build outputs (keep bin/ - it holds the bundled guardian binary & policies)
+*.vsix
