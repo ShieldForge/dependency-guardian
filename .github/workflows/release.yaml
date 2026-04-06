@@ -1,115 +1,118 @@
 name: Release
+permissions:
+  contents: read
+  pull-requests: write
 
 on:
-    push:
-        tags:
-            - "v*"
+  push:
+    tags:
+      - "v*"
 
 jobs:
-    build-binaries:
-        name: Build ${{ matrix.os }}/${{ matrix.goarch }}
-        runs-on: ubuntu-latest
-        strategy:
-            matrix:
-                include:
-                    - os: linux
-                      goos: linux
-                      goarch: amd64
-                      artifact: guardian-linux-amd64
-                    - os: linux
-                      goos: linux
-                      goarch: arm64
-                      artifact: guardian-linux-arm64
-                    - os: windows
-                      goos: windows
-                      goarch: amd64
-                      artifact: guardian-windows-amd64.exe
-                    - os: windows
-                      goos: windows
-                      goarch: arm64
-                      artifact: guardian-windows-arm64.exe
-                    - os: macos
-                      goos: darwin
-                      goarch: amd64
-                      artifact: guardian-darwin-amd64
-                    - os: macos
-                      goos: darwin
-                      goarch: arm64
-                      artifact: guardian-darwin-arm64
+  build-binaries:
+    name: Build ${{ matrix.os }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            goos: linux
+            goarch: amd64
+            artifact: guardian-linux-amd64
+          - os: linux
+            goos: linux
+            goarch: arm64
+            artifact: guardian-linux-arm64
+          - os: windows
+            goos: windows
+            goarch: amd64
+            artifact: guardian-windows-amd64.exe
+          - os: windows
+            goos: windows
+            goarch: arm64
+            artifact: guardian-windows-arm64.exe
+          - os: macos
+            goos: darwin
+            goarch: amd64
+            artifact: guardian-darwin-amd64
+          - os: macos
+            goos: darwin
+            goarch: arm64
+            artifact: guardian-darwin-arm64
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up Go
-              uses: actions/setup-go@v4
-              with:
-                  go-version: "1.25.4"
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.25.4"
 
-            - name: Build
-              env:
-                  GOOS: ${{ matrix.goos }}
-                  GOARCH: ${{ matrix.goarch }}
-                  CGO_ENABLED: 0
-              run: go build -trimpath -ldflags="-s -w" -v -o ${{ matrix.artifact }} ./cmd/guardian/
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -trimpath -ldflags="-s -w" -v -o ${{ matrix.artifact }} ./cmd/guardian/
 
-            - name: Upload artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: ${{ matrix.artifact }}
-                  path: ${{ matrix.artifact }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
 
-    build-vsix:
-        name: Package VSIX (${{ matrix.target }})
-        runs-on: ubuntu-latest
-        strategy:
-            matrix:
-                target:
-                    - linux-x64
-                    - linux-arm64
-                    - darwin-x64
-                    - darwin-arm64
-                    - win32-x64
-                    - win32-arm64
+  build-vsix:
+    name: Package VSIX (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - linux-x64
+          - linux-arm64
+          - darwin-x64
+          - darwin-arm64
+          - win32-x64
+          - win32-arm64
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up Go
-              uses: actions/setup-go@v4
-              with:
-                  go-version: "1.25.4"
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.25.4"
 
-            - name: Set up Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "25.x"
-                  cache: "npm"
-                  cache-dependency-path: vscode-extension/package-lock.json
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25.x"
+          cache: "npm"
+          cache-dependency-path: vscode-extension/package-lock.json
 
-            - name: Build and package VSIX
-              working-directory: vscode-extension
-              run: bash scripts/package.sh --target ${{ matrix.target }}
+      - name: Build and package VSIX
+        working-directory: vscode-extension
+        run: bash scripts/package.sh --target ${{ matrix.target }}
 
-            - name: Upload VSIX
-              uses: actions/upload-artifact@v4
-              with:
-                  name: vsix-${{ matrix.target }}
-                  path: vscode-extension/*.vsix
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: vscode-extension/*.vsix
 
-    release:
-        name: Create Release
-        needs: [build-binaries, build-vsix]
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
-        steps:
-            - name: Download all artifacts
-              uses: actions/download-artifact@v4
-              with:
-                  path: artifacts
-                  merge-multiple: true
+  release:
+    name: Create Release
+    needs: [build-binaries, build-vsix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
 
-            - name: Create GitHub Release
-              uses: softprops/action-gh-release@v2
-              with:
-                  files: artifacts/*
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
