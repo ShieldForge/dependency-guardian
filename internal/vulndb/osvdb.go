@@ -7,14 +7,10 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	goversion "github.com/hashicorp/go-version"
-	mvnversion "github.com/masahiro331/go-mvn-version"
-
 	"dependency-guardian/internal/registry"
+	"dependency-guardian/internal/vercmp"
 	"dependency-guardian/internal/vulndb/dal"
 	"dependency-guardian/internal/vulndb/models"
-
-	pepversion "github.com/aquasecurity/go-pep440-version"
 )
 
 // OSVDatabase implements registry.VulnerabilityDB using the local
@@ -178,7 +174,7 @@ func VersionMatchesConstraint(version, constraintJSON, ecosystem string) bool {
 	}
 
 	// Pick comparison based on constraint type and ecosystem.
-	cmp := comparerFor(c.Type, ecosystem)
+	cmp := vercmp.ComparerFor(c.Type, ecosystem)
 
 	introduced := false
 	for _, e := range c.Events {
@@ -198,64 +194,4 @@ func VersionMatchesConstraint(version, constraintJSON, ecosystem string) bool {
 	}
 
 	return introduced
-}
-
-// comparerFor returns a version comparison function appropriate for the
-// given constraint type and ecosystem. SEMVER constraints always use
-// hashicorp/go-version. ECOSYSTEM constraints dispatch to the
-// ecosystem-specific library (Maven, PyPI, or go-version as fallback).
-func comparerFor(constraintType, ecosystem string) func(a, b string) int {
-	if constraintType == "SEMVER" {
-		return compareSemver
-	}
-	switch ecosystem {
-	case "Maven":
-		return compareMaven
-	case "PyPI":
-		return comparePyPI
-	default:
-		return compareSemver
-	}
-}
-
-// compareSemver compares versions using hashicorp/go-version (semver).
-func compareSemver(a, b string) int {
-	va, errA := goversion.NewVersion(a)
-	vb, errB := goversion.NewVersion(b)
-	if errA != nil || errB != nil {
-		return fallbackCompare(a, b)
-	}
-	return va.Compare(vb)
-}
-
-// compareMaven compares versions using masahiro331/go-mvn-version.
-func compareMaven(a, b string) int {
-	va, errA := mvnversion.NewVersion(a)
-	vb, errB := mvnversion.NewVersion(b)
-	if errA != nil || errB != nil {
-		return fallbackCompare(a, b)
-	}
-	return va.Compare(vb)
-}
-
-// comparePyPI compares versions using aquasecurity/go-pep440-version.
-func comparePyPI(a, b string) int {
-	va, errA := pepversion.Parse(a)
-	vb, errB := pepversion.Parse(b)
-	if errA != nil || errB != nil {
-		return fallbackCompare(a, b)
-	}
-	return va.Compare(vb)
-}
-
-// fallbackCompare is a simple lexicographic comparison used when the
-// ecosystem-specific parser fails to parse a version string.
-func fallbackCompare(a, b string) int {
-	if a < b {
-		return -1
-	}
-	if a > b {
-		return 1
-	}
-	return 0
 }

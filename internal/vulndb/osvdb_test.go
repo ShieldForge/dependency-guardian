@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dependency-guardian/internal/registry"
+	"dependency-guardian/internal/vercmp"
 	"dependency-guardian/internal/vulndb/dal"
 	"dependency-guardian/internal/vulndb/models"
 
@@ -387,7 +388,7 @@ func TestComparerFor(t *testing.T) {
 		name      string
 		a, b      string
 		ecosystem string
-		expected  int
+		want      int
 	}{
 		// semver via go-version
 		{"semver_equal", "1.0.0", "1.0.0", "npm", 0},
@@ -410,10 +411,10 @@ func TestComparerFor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmp := comparerFor("ECOSYSTEM", tt.ecosystem)
+			cmp := vercmp.ComparerFor("ECOSYSTEM", tt.ecosystem)
 			got := cmp(tt.a, tt.b)
-			if got != tt.expected {
-				t.Errorf("comparerFor(ECOSYSTEM, %q)(%q, %q) = %d, want %d", tt.ecosystem, tt.a, tt.b, got, tt.expected)
+			if got != tt.want {
+				t.Errorf("vercmp.ComparerFor(ECOSYSTEM, %q)(%q, %q) = %d, want %d", tt.ecosystem, tt.a, tt.b, got, tt.want)
 			}
 		})
 	}
