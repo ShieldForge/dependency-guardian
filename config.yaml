@@ -43,3 +43,62 @@ sync:
   metrics_interval: 1h # how often to recalculate metrics
   batch_size: 100
   workers: 2
+
+# Dependency rewrite rules
+# Rules are evaluated in order; the first matching rule wins.
+# Strategies: pin, nearest-minor, nearest-major, min, max,
+#             replace-major, replace-minor, replace-patch
+# Modes: transparent (default, serve silently), redirect (HTTP 302)
+# rewrites:
+#   rules:
+#     # Pin a specific package to an exact version
+#     - match:
+#         ecosystem: "npm"
+#         name: "lodash"
+#       rewrite:
+#         version:
+#           strategy: "pin"
+#           target: "4.17.21"
+#
+#     # Snap all npm packages to their nearest minor release (zero out patch)
+#     - match:
+#         ecosystem: "npm"
+#         name: "*"
+#       rewrite:
+#         version:
+#           strategy: "nearest-minor"
+#
+#     # Enforce a minimum version for a PyPI package
+#     - match:
+#         ecosystem: "pypi"
+#         name: "requests"
+#       rewrite:
+#         version:
+#           strategy: "min"
+#           target: "2.28.0"
+#
+#     # Cap a Go module at a maximum version
+#     - match:
+#         ecosystem: "go"
+#         name: "github.com/example/lib"
+#       rewrite:
+#         version:
+#           strategy: "max"
+#           target: "v1.5.0"
+#
+#     # Replace package name (e.g., redirect to a fork)
+#     - match:
+#         ecosystem: "npm"
+#         name: "moment"
+#       rewrite:
+#         name: "dayjs"
+#
+#     # Only rewrite versions matching a glob pattern
+#     - match:
+#         ecosystem: "maven"
+#         name: "org.apache.commons:*"
+#         version: "3.*"
+#       rewrite:
+#         version:
+#           strategy: "nearest-major"
+#         mode: "redirect"
