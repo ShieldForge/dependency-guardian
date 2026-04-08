@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"dependency-guardian/internal/decisions"
-	"dependency-guardian/internal/handler/upstream"
+	"dependency-guardian/internal/handler"
 	"dependency-guardian/internal/policy"
 	"dependency-guardian/internal/registry"
 	"dependency-guardian/internal/rewrite"
@@ -26,23 +26,13 @@ import (
 
 // Handler processes PyPI registry requests.
 type Handler struct {
-	upstream *upstream.Client
-	engine   *policy.Engine
-	vulnDB   registry.VulnerabilityDB
-	logger   *slog.Logger
-	recorder decisions.Recorder
-	rewriter *rewrite.Engine
+	handler.Base
 }
 
 // NewHandler creates a new PyPI proxy handler.
 func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder, rewriter *rewrite.Engine) *Handler {
 	return &Handler{
-		upstream: upstream.NewClient(strings.TrimRight(upstreamURL, "/"), 30*time.Second),
-		engine:   engine,
-		vulnDB:   vulnDB,
-		logger:   logger.With("handler", "pypi"),
-		recorder: recorder,
-		rewriter: rewriter,
+		Base: handler.NewBase(upstreamURL, engine, vulnDB, logger, recorder, rewriter, "pypi"),
 	}
 }
 
@@ -54,12 +44,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/simple/"):
 		// Simple API – HTML index of package files.
 		// We pass this through; the JSON API is richer for filtering.
-		h.upstream.Passthrough(w, r)
+		h.Upstream.Passthrough(w, r)
 	case isJSONMetadataRequest(path):
 		h.handleJSONMetadata(w, r)
 	default:
 		// Package file downloads and everything else – pass through.
-		h.upstream.Passthrough(w, r)
+		h.Upstream.Passthrough(w, r)
 	}
 }
 
@@ -68,7 +58,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleJSONMetadata(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	upstreamURL := h.upstream.BaseURL + r.URL.Path
+	upstreamURL := h.Upstream.BaseURL + r.URL.Path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
 		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
@@ -76,9 +66,9 @@ func (h *Handler) handleJSONMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := h.upstream.HTTPClient.Do(req)
+	resp, err := h.Upstream.HTTPClient.Do(req)
 	if err != nil {
-		h.logger.Error("upstream request failed", "url", upstreamURL, "error", err)
+		h.Logger.Error("upstream request failed", "url", upstreamURL, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
@@ -98,7 +88,7 @@ func (h *Handler) handleJSONMetadata(w http.ResponseWriter, r *http.Request) {
 
 	filtered, err := h.filterMetadata(ctx, body)
 	if err != nil {
-		h.logger.Error("filtering metadata failed", "error", err)
+		h.Logger.Error("filtering metadata failed", "error", err)
 		http.Error(w, "policy evaluation failed", http.StatusInternalServerError)
 		return
 	}
@@ -128,11 +118,11 @@ func (h *Handler) filterMetadata(ctx context.Context, body []byte) ([]byte, erro
 
 	for ver, files := range releases {
 		// Check rewrite rules before policy evaluation.
-		if h.rewriter != nil {
-			rr := h.rewriter.Apply("pypi", pkgName, ver)
+		if h.Rewriter != nil {
+			rr := h.Rewriter.Apply("pypi", pkgName, ver)
 			if rr.Matched && rr.Version != ver {
 				if _, targetExists := releases[rr.Version]; targetExists {
-					h.logger.Info("version rewritten",
+					h.Logger.Info("version rewritten",
 						"package", pkgName,
 						"from", ver,
 						"to", rr.Version,
@@ -155,31 +145,12 @@ func (h *Handler) filterMetadata(ctx context.Context, body []byte) ([]byte, erro
 			Yanked:      yanked,
 		}
 
-		vulns, err := h.vulnDB.GetVulnerabilities(ctx, registry.EcosystemPyPI, pkgName, ver)
-		if err != nil {
-			h.logger.Warn("vulnerability lookup failed", "package", pkgName, "version", ver, "error", err)
-		}
-
-		input := registry.PolicyInput{
-			Package:         pv,
-			Vulnerabilities: vulns,
-		}
-
-		result, err := h.engine.Evaluate(ctx, input)
+		result, err := h.EvaluateVersion(ctx, pv)
 		if err != nil {
 			return nil, fmt.Errorf("evaluating policy for %s==%s: %w", pkgName, ver, err)
 		}
 
-		if h.recorder != nil {
-			h.recorder.Record("pypi", pkgName, ver, result.Allowed, result.Reasons, len(vulns))
-		}
-
 		if !result.Allowed {
-			h.logger.Info("version denied by policy",
-				"package", pkgName,
-				"version", ver,
-				"reasons", result.Reasons,
-			)
 			delete(releases, ver)
 			removed = append(removed, ver)
 		}

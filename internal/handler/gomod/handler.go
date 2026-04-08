@@ -11,7 +11,6 @@ package gomod
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,7 +20,7 @@ import (
 	"time"
 
 	"dependency-guardian/internal/decisions"
-	"dependency-guardian/internal/handler/upstream"
+	"dependency-guardian/internal/handler"
 	"dependency-guardian/internal/policy"
 	"dependency-guardian/internal/registry"
 	"dependency-guardian/internal/rewrite"
@@ -29,12 +28,7 @@ import (
 
 // Handler processes Go module proxy requests.
 type Handler struct {
-	upstream *upstream.Client
-	engine   *policy.Engine
-	vulnDB   registry.VulnerabilityDB
-	logger   *slog.Logger
-	recorder decisions.Recorder
-	rewriter *rewrite.Engine
+	handler.Base
 }
 
 // versionInfo is the JSON structure returned by @v/<ver>.info and @latest.
@@ -46,12 +40,7 @@ type versionInfo struct {
 // NewHandler creates a new Go module proxy handler.
 func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder, rewriter *rewrite.Engine) *Handler {
 	return &Handler{
-		upstream: upstream.NewClient(strings.TrimRight(upstreamURL, "/"), 30*time.Second),
-		engine:   engine,
-		vulnDB:   vulnDB,
-		logger:   logger.With("handler", "gomod"),
-		recorder: recorder,
-		rewriter: rewriter,
+		Base: handler.NewBase(upstreamURL, engine, vulnDB, logger, recorder, rewriter, "gomod"),
 	}
 }
 
@@ -68,7 +57,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleVersionInfo(w, r)
 	default:
 		// .mod and .zip files – pass through unmodified.
-		h.upstream.Passthrough(w, r)
+		h.Upstream.Passthrough(w, r)
 	}
 }
 
@@ -78,16 +67,16 @@ func (h *Handler) handleVersionList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	modulePath := extractModulePath(r.URL.Path, "/@v/list")
 
-	upstreamURL := h.upstream.BaseURL + r.URL.Path
+	upstreamURL := h.Upstream.BaseURL + r.URL.Path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
 		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
 		return
 	}
 
-	resp, err := h.upstream.HTTPClient.Do(req)
+	resp, err := h.Upstream.HTTPClient.Do(req)
 	if err != nil {
-		h.logger.Error("upstream request failed", "url", upstreamURL, "error", err)
+		h.Logger.Error("upstream request failed", "url", upstreamURL, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
@@ -113,15 +102,15 @@ func (h *Handler) handleVersionList(w http.ResponseWriter, r *http.Request) {
 	// Apply rewrite rules: remove versions that are rewritten to a different
 	// version that also exists in the list.
 	rewrittenAway := make(map[string]bool)
-	if h.rewriter != nil {
+	if h.Rewriter != nil {
 		versionSet := make(map[string]bool, len(allVersions))
 		for _, v := range allVersions {
 			versionSet[v] = true
 		}
 		for _, ver := range allVersions {
-			rr := h.rewriter.Apply("go", modulePath, ver)
+			rr := h.Rewriter.Apply("go", modulePath, ver)
 			if rr.Matched && rr.Version != ver && versionSet[rr.Version] {
-				h.logger.Info("version rewritten",
+				h.Logger.Info("version rewritten",
 					"module", modulePath,
 					"from", ver,
 					"to", rr.Version,
@@ -137,12 +126,18 @@ func (h *Handler) handleVersionList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		ok, err := h.evaluateVersion(ctx, modulePath, ver)
+		pv := registry.PackageVersion{
+			Name:      modulePath,
+			Version:   ver,
+			Ecosystem: registry.EcosystemGo,
+		}
+
+		result, err := h.EvaluateVersion(ctx, pv)
 		if err != nil {
-			h.logger.Error("policy evaluation failed", "module", modulePath, "version", ver, "error", err)
+			h.Logger.Error("policy evaluation failed", "module", modulePath, "version", ver, "error", err)
 			continue
 		}
-		if ok {
+		if result.Allowed {
 			allowed = append(allowed, ver)
 		}
 	}
@@ -160,7 +155,7 @@ func (h *Handler) handleLatest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	modulePath := extractModulePath(r.URL.Path, "/@latest")
 
-	body, statusCode, err := h.upstream.Fetch(r, r.URL.Path)
+	body, statusCode, err := h.Upstream.Fetch(r, r.URL.Path)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -177,14 +172,20 @@ func (h *Handler) handleLatest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := h.evaluateVersionWithTime(ctx, modulePath, vi.Version, vi.Time)
+	pv := registry.PackageVersion{
+		Name:        modulePath,
+		Version:     vi.Version,
+		Ecosystem:   registry.EcosystemGo,
+		PublishedAt: vi.Time,
+	}
+
+	result, err := h.EvaluateVersion(ctx, pv)
 	if err != nil {
 		http.Error(w, "policy evaluation failed", http.StatusInternalServerError)
 		return
 	}
 
-	if !ok {
-		h.logger.Info("latest version denied by policy", "module", modulePath, "version", vi.Version)
+	if !result.Allowed {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -204,7 +205,7 @@ func (h *Handler) handleVersionInfo(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	atV := strings.LastIndex(path, "/@v/")
 	if atV < 0 {
-		h.upstream.Passthrough(w, r)
+		h.Upstream.Passthrough(w, r)
 		return
 	}
 	modulePath := path[1:atV] // strip leading /
@@ -212,10 +213,10 @@ func (h *Handler) handleVersionInfo(w http.ResponseWriter, r *http.Request) {
 	ver := strings.TrimSuffix(versionFile, ".info")
 
 	// Apply rewrite rules to the requested version.
-	if h.rewriter != nil {
-		rr := h.rewriter.Apply("go", modulePath, ver)
+	if h.Rewriter != nil {
+		rr := h.Rewriter.Apply("go", modulePath, ver)
 		if rr.Matched && rr.Version != ver {
-			h.logger.Info("version rewritten",
+			h.Logger.Info("version rewritten",
 				"module", modulePath,
 				"from", ver,
 				"to", rr.Version,
@@ -231,7 +232,7 @@ func (h *Handler) handleVersionInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	body, statusCode, err := h.upstream.Fetch(r, path)
+	body, statusCode, err := h.Upstream.Fetch(r, path)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -248,14 +249,20 @@ func (h *Handler) handleVersionInfo(w http.ResponseWriter, r *http.Request) {
 		vi = versionInfo{Version: ver}
 	}
 
-	ok, err := h.evaluateVersionWithTime(ctx, modulePath, ver, vi.Time)
+	pv := registry.PackageVersion{
+		Name:        modulePath,
+		Version:     ver,
+		Ecosystem:   registry.EcosystemGo,
+		PublishedAt: vi.Time,
+	}
+
+	result, err := h.EvaluateVersion(ctx, pv)
 	if err != nil {
 		http.Error(w, "policy evaluation failed", http.StatusInternalServerError)
 		return
 	}
 
-	if !ok {
-		h.logger.Info("version denied by policy", "module", modulePath, "version", ver)
+	if !result.Allowed {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -263,51 +270,6 @@ func (h *Handler) handleVersionInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)
-}
-
-// evaluateVersion evaluates a Go module version against policy without
-// a known publish time (will be fetched from .info if needed in future).
-func (h *Handler) evaluateVersion(ctx context.Context, modulePath, version string) (bool, error) {
-	return h.evaluateVersionWithTime(ctx, modulePath, version, time.Time{})
-}
-
-// evaluateVersionWithTime evaluates a Go module version against policy.
-func (h *Handler) evaluateVersionWithTime(ctx context.Context, modulePath, version string, publishedAt time.Time) (bool, error) {
-	pv := registry.PackageVersion{
-		Name:        modulePath,
-		Version:     version,
-		Ecosystem:   registry.EcosystemGo,
-		PublishedAt: publishedAt,
-	}
-
-	vulns, err := h.vulnDB.GetVulnerabilities(ctx, registry.EcosystemGo, modulePath, version)
-	if err != nil {
-		h.logger.Warn("vulnerability lookup failed", "module", modulePath, "version", version, "error", err)
-	}
-
-	input := registry.PolicyInput{
-		Package:         pv,
-		Vulnerabilities: vulns,
-	}
-
-	result, err := h.engine.Evaluate(ctx, input)
-	if err != nil {
-		return false, err
-	}
-
-	if !result.Allowed {
-		h.logger.Info("version denied by policy",
-			"module", modulePath,
-			"version", version,
-			"reasons", result.Reasons,
-		)
-	}
-
-	if h.recorder != nil {
-		h.recorder.Record("go", modulePath, version, result.Allowed, result.Reasons, len(vulns))
-	}
-
-	return result.Allowed, nil
 }
 
 // extractModulePath strips the suffix from the request path to get the module path.

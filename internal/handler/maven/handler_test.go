@@ -268,7 +268,7 @@ func TestHandler_Upstream404(t *testing.T) {
 func TestNewHandler_TrimsTrailingSlash(t *testing.T) {
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
 	h := NewHandler("https://repo1.maven.org/maven2/", engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
-	if h.upstream.BaseURL != "https://repo1.maven.org/maven2" {
-		t.Errorf("expected trailing slash trimmed, got %q", h.upstream.BaseURL)
+	if h.Upstream.BaseURL != "https://repo1.maven.org/maven2" {
+		t.Errorf("expected trailing slash trimmed, got %q", h.Upstream.BaseURL)
 	}
 }

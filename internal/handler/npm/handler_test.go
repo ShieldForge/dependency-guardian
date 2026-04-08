@@ -343,10 +343,10 @@ func TestNewHandler_TrimsTrailingSlash(t *testing.T) {
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
 	h := NewHandler("https://registry.npmjs.org/", engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
-	if h.upstream.BaseURL != "https://registry.npmjs.org" {
-		t.Errorf("expected trimmed upstream, got %s", h.upstream.BaseURL)
+	if h.Upstream.BaseURL != "https://registry.npmjs.org" {
+		t.Errorf("expected trimmed upstream, got %s", h.Upstream.BaseURL)
 	}
-	if h.upstream.HTTPClient.Timeout != 30*time.Second {
-		t.Errorf("expected 30s timeout, got %v", h.upstream.HTTPClient.Timeout)
+	if h.Upstream.HTTPClient.Timeout != 30*time.Second {
+		t.Errorf("expected 30s timeout, got %v", h.Upstream.HTTPClient.Timeout)
 	}
 }
