@@ -1,0 +1,78 @@
+# Dependency rewrite rules
+# Rules are evaluated in order; the first matching rule wins.
+#
+# Strategies:
+#   pin            - always use the specified target version
+#   nearest-minor  - snap to the minor release boundary (zero out patch)
+#   nearest-major  - snap to the major release boundary (zero out minor and patch)
+#   min            - if version < target, upgrade to target
+#   max            - if version > target, downgrade to target
+#   replace-major  - replace the major component with target
+#   replace-minor  - replace the minor component with target
+#   replace-patch  - replace the patch component with target
+#
+# Modes:
+#   transparent (default) - serve the rewritten version silently
+#   redirect              - return an HTTP 302 to the rewritten version URL
+#
+# Match fields:
+#   ecosystem - npm, pypi, go, maven (case-insensitive)
+#   name      - exact name or glob pattern (e.g. "lodash", "org.apache.commons:*")
+#   version   - optional glob pattern to restrict which versions trigger the rule
+
+rules: []
+
+# Examples:
+#
+# rules:
+#   # Pin a specific package to an exact version
+#   - match:
+#       ecosystem: "npm"
+#       name: "lodash"
+#     rewrite:
+#       version:
+#         strategy: "pin"
+#         target: "4.17.21"
+#
+#   # Snap all npm packages to their nearest minor release
+#   - match:
+#       ecosystem: "npm"
+#       name: "*"
+#     rewrite:
+#       version:
+#         strategy: "nearest-minor"
+#
+#   # Enforce a minimum version for a PyPI package
+#   - match:
+#       ecosystem: "pypi"
+#       name: "requests"
+#     rewrite:
+#       version:
+#         strategy: "min"
+#         target: "2.28.0"
+#
+#   # Cap a Go module at a maximum version
+#   - match:
+#       ecosystem: "go"
+#       name: "github.com/example/lib"
+#     rewrite:
+#       version:
+#         strategy: "max"
+#         target: "v1.5.0"
+#
+#   # Replace package name (e.g., redirect to a fork)
+#   - match:
+#       ecosystem: "npm"
+#       name: "moment"
+#     rewrite:
+#       name: "dayjs"
+#
+#   # Only rewrite versions matching a glob pattern
+#   - match:
+#       ecosystem: "maven"
+#       name: "org.apache.commons:*"
+#       version: "3.*"
+#     rewrite:
+#       version:
+#         strategy: "nearest-major"
+#       mode: "redirect"

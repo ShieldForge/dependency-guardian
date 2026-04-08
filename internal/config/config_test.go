@@ -178,3 +178,162 @@ server:
 		}
 	})
 }
+
+func TestLoadFromFile_RewritesFile(t *testing.T) {
+	t.Run("loads_rules_from_external_file", func(t *testing.T) {
+		dir := t.TempDir()
+
+		rewritesYAML := `
+rules:
+  - match:
+      ecosystem: "npm"
+      name: "lodash"
+    rewrite:
+      version:
+        strategy: "pin"
+        target: "4.17.21"
+  - match:
+      ecosystem: "pypi"
+      name: "requests"
+    rewrite:
+      version:
+        strategy: "min"
+        target: "2.28.0"
+`
+		rwPath := filepath.Join(dir, "rewrites.yaml")
+		if err := os.WriteFile(rwPath, []byte(rewritesYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		configYAML := `
+server:
+  listen_addr: ":8080"
+rewrites_file: "rewrites.yaml"
+`
+		cfgPath := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(cfgPath, []byte(configYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadFromFile(cfgPath)
+		if err != nil {
+			t.Fatalf("LoadFromFile failed: %v", err)
+		}
+
+		if len(cfg.Rewrites.Rules) != 2 {
+			t.Fatalf("expected 2 rewrite rules, got %d", len(cfg.Rewrites.Rules))
+		}
+		if cfg.Rewrites.Rules[0].Match.Name != "lodash" {
+			t.Errorf("expected first rule to match lodash, got %s", cfg.Rewrites.Rules[0].Match.Name)
+		}
+		if cfg.Rewrites.Rules[0].Rewrite.Version.Strategy != "pin" {
+			t.Errorf("expected pin strategy, got %s", cfg.Rewrites.Rules[0].Rewrite.Version.Strategy)
+		}
+		if cfg.Rewrites.Rules[1].Match.Ecosystem != "pypi" {
+			t.Errorf("expected pypi ecosystem, got %s", cfg.Rewrites.Rules[1].Match.Ecosystem)
+		}
+	})
+
+	t.Run("missing_rewrites_file_returns_error", func(t *testing.T) {
+		dir := t.TempDir()
+
+		configYAML := `
+server:
+  listen_addr: ":8080"
+rewrites_file: "nonexistent.yaml"
+`
+		cfgPath := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(cfgPath, []byte(configYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := LoadFromFile(cfgPath)
+		if err == nil {
+			t.Error("expected error for missing rewrites file")
+		}
+	})
+
+	t.Run("inline_rewrites_still_work", func(t *testing.T) {
+		dir := t.TempDir()
+
+		configYAML := `
+server:
+  listen_addr: ":8080"
+rewrites:
+  rules:
+    - match:
+        ecosystem: "npm"
+        name: "express"
+      rewrite:
+        version:
+          strategy: "pin"
+          target: "4.18.0"
+`
+		cfgPath := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(cfgPath, []byte(configYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadFromFile(cfgPath)
+		if err != nil {
+			t.Fatalf("LoadFromFile failed: %v", err)
+		}
+
+		if len(cfg.Rewrites.Rules) != 1 {
+			t.Fatalf("expected 1 inline rewrite rule, got %d", len(cfg.Rewrites.Rules))
+		}
+		if cfg.Rewrites.Rules[0].Match.Name != "express" {
+			t.Errorf("expected express, got %s", cfg.Rewrites.Rules[0].Match.Name)
+		}
+	})
+
+	t.Run("external_file_overrides_inline", func(t *testing.T) {
+		dir := t.TempDir()
+
+		rewritesYAML := `
+rules:
+  - match:
+      ecosystem: "go"
+      name: "*"
+    rewrite:
+      version:
+        strategy: "nearest-minor"
+`
+		rwPath := filepath.Join(dir, "rewrites.yaml")
+		if err := os.WriteFile(rwPath, []byte(rewritesYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Both inline and file specified; file should win.
+		configYAML := `
+server:
+  listen_addr: ":8080"
+rewrites_file: "rewrites.yaml"
+rewrites:
+  rules:
+    - match:
+        ecosystem: "npm"
+        name: "lodash"
+      rewrite:
+        version:
+          strategy: "pin"
+          target: "4.17.21"
+`
+		cfgPath := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(cfgPath, []byte(configYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadFromFile(cfgPath)
+		if err != nil {
+			t.Fatalf("LoadFromFile failed: %v", err)
+		}
+
+		if len(cfg.Rewrites.Rules) != 1 {
+			t.Fatalf("expected 1 rule from file, got %d", len(cfg.Rewrites.Rules))
+		}
+		if cfg.Rewrites.Rules[0].Match.Ecosystem != "go" {
+			t.Errorf("expected go ecosystem from file, got %s", cfg.Rewrites.Rules[0].Match.Ecosystem)
+		}
+	})
+}

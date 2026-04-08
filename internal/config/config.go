@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -12,13 +13,14 @@ import (
 
 // Config holds the top-level application configuration.
 type Config struct {
-	Server    ServerConfig   `yaml:"server"`
-	Upstreams UpstreamConfig `yaml:"upstreams"`
-	Policies  PoliciesConfig `yaml:"policies"`
-	Logging   LoggingConfig  `yaml:"logging"`
-	VulnDB    VulnDBConfig   `yaml:"vulndb"`
-	Sync      SyncConfig     `yaml:"sync"`
-	Rewrites  RewriteConfig  `yaml:"rewrites"`
+	Server       ServerConfig   `yaml:"server"`
+	Upstreams    UpstreamConfig `yaml:"upstreams"`
+	Policies     PoliciesConfig `yaml:"policies"`
+	Logging      LoggingConfig  `yaml:"logging"`
+	VulnDB       VulnDBConfig   `yaml:"vulndb"`
+	Sync         SyncConfig     `yaml:"sync"`
+	RewritesFile string         `yaml:"rewrites_file,omitempty"`
+	Rewrites     RewriteConfig  `yaml:"rewrites"`
 }
 
 // RewriteConfig holds dependency rewrite rules.
@@ -184,7 +186,33 @@ func LoadFromFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
+	// Load rewrite rules from an external file if configured.
+	if cfg.RewritesFile != "" {
+		rwPath := cfg.RewritesFile
+		if !filepath.IsAbs(rwPath) {
+			rwPath = filepath.Join(filepath.Dir(path), rwPath)
+		}
+		rwCfg, err := loadRewritesFile(rwPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading rewrites file: %w", err)
+		}
+		cfg.Rewrites = *rwCfg
+	}
+
 	return cfg, nil
+}
+
+// loadRewritesFile reads a standalone rewrite-rules YAML file.
+func loadRewritesFile(path string) (*RewriteConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading rewrites file %q: %w", path, err)
+	}
+	var rc RewriteConfig
+	if err := yaml.Unmarshal(data, &rc); err != nil {
+		return nil, fmt.Errorf("parsing rewrites file %q: %w", path, err)
+	}
+	return &rc, nil
 }
 
 // Validate checks the configuration for invalid or missing values.
