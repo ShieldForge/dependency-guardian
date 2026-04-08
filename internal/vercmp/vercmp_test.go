@@ -93,3 +93,82 @@ func TestFallback(t *testing.T) {
 		t.Error("expected 0")
 	}
 }
+
+func TestParseVersion(t *testing.T) {
+	tests := []struct {
+		input     string
+		ecosystem string
+		wantOk    bool
+		major     int
+		minor     int
+		patch     int
+		prefix    string
+		preRel    string
+		segs      int
+	}{
+		// Semver (npm/go)
+		{"1.2.3", "npm", true, 1, 2, 3, "", "", 3},
+		{"v1.2.3", "npm", true, 1, 2, 3, "v", "", 3},
+		{"0.0.1", "npm", true, 0, 0, 1, "", "", 3},
+		{"1.2.3-beta.1", "npm", true, 1, 2, 3, "", "-beta.1", 3},
+		{"v2.0.0-rc1", "npm", true, 2, 0, 0, "v", "-rc1", 3},
+		{"10.20.30", "npm", true, 10, 20, 30, "", "", 3},
+		{"", "npm", false, 0, 0, 0, "", "", 0},
+		{"abc", "npm", false, 0, 0, 0, "", "", 0},
+		// PyPI
+		{"1.2.3", "pypi", true, 1, 2, 3, "", "", 3},
+		{"1.0a1", "pypi", true, 1, 0, 0, "", "a1", 2},
+		{"1.0.post1", "pypi", true, 1, 0, 0, "", ".post1", 2},
+		{"not-a-version", "pypi", false, 0, 0, 0, "", "", 0},
+		// Maven
+		{"1.2.3", "maven", true, 1, 2, 3, "", "", 3},
+		{"1.0.0-SNAPSHOT", "maven", true, 1, 0, 0, "", "-SNAPSHOT", 3},
+		// Go
+		{"v1.2.3", "go", true, 1, 2, 3, "v", "", 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input+"_"+tt.ecosystem, func(t *testing.T) {
+			pv, ok := ParseVersion(tt.input, tt.ecosystem)
+			if ok != tt.wantOk {
+				t.Fatalf("ParseVersion(%q, %q) ok = %v, want %v", tt.input, tt.ecosystem, ok, tt.wantOk)
+			}
+			if !ok {
+				return
+			}
+			if pv.Major != tt.major || pv.Minor != tt.minor || pv.Patch != tt.patch {
+				t.Errorf("got %d.%d.%d, want %d.%d.%d", pv.Major, pv.Minor, pv.Patch, tt.major, tt.minor, tt.patch)
+			}
+			if pv.Prefix != tt.prefix {
+				t.Errorf("prefix = %q, want %q", pv.Prefix, tt.prefix)
+			}
+			if pv.PreRelease != tt.preRel {
+				t.Errorf("preRelease = %q, want %q", pv.PreRelease, tt.preRel)
+			}
+			if pv.Segments != tt.segs {
+				t.Errorf("segments = %d, want %d", pv.Segments, tt.segs)
+			}
+		})
+	}
+}
+
+func TestParsedVersionFormat(t *testing.T) {
+	tests := []struct {
+		pv   ParsedVersion
+		want string
+	}{
+		{ParsedVersion{Major: 1, Minor: 2, Patch: 3, Segments: 3}, "1.2.3"},
+		{ParsedVersion{Prefix: "v", Major: 1, Minor: 2, Patch: 3, Segments: 3}, "v1.2.3"},
+		{ParsedVersion{Major: 1, Minor: 2, Patch: 3, PreRelease: "-beta.1", Segments: 3}, "1.2.3-beta.1"},
+		{ParsedVersion{Major: 1, Minor: 2, Segments: 2}, "1.2"},
+		{ParsedVersion{Major: 1, Segments: 1}, "1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := tt.pv.Format(); got != tt.want {
+				t.Errorf("Format() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
