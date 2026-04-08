@@ -120,7 +120,7 @@ func TestHandler_Metadata_AllAllowed(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	handler := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	handler := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/org/example/mylib/maven-metadata.xml", nil)
 	w := httptest.NewRecorder()
@@ -156,7 +156,7 @@ func TestHandler_Metadata_SomeFiltered(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyMaliciousRego)
-	handler := NewHandler(upstream.URL, engine, mockVuln, slog.Default(), nil)
+	handler := NewHandler(upstream.URL, engine, mockVuln, slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/org/example/mylib/maven-metadata.xml", nil)
 	w := httptest.NewRecorder()
@@ -198,7 +198,7 @@ func TestHandler_Metadata_AllDenied(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyAllRego)
-	handler := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	handler := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/org/example/mylib/maven-metadata.xml", nil)
 	w := httptest.NewRecorder()
@@ -232,7 +232,7 @@ func TestHandler_ArtifactPassthrough(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyAllRego)
-	handler := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	handler := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/org/example/mylib/1.0.0/mylib-1.0.0.jar", nil)
 	w := httptest.NewRecorder()
@@ -254,7 +254,7 @@ func TestHandler_Upstream404(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	handler := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	handler := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/org/example/nonexistent/maven-metadata.xml", nil)
 	w := httptest.NewRecorder()
@@ -267,7 +267,7 @@ func TestHandler_Upstream404(t *testing.T) {
 
 func TestNewHandler_TrimsTrailingSlash(t *testing.T) {
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler("https://repo1.maven.org/maven2/", engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler("https://repo1.maven.org/maven2/", engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 	if h.upstream.BaseURL != "https://repo1.maven.org/maven2" {
 		t.Errorf("expected trailing slash trimmed, got %q", h.upstream.BaseURL)
 	}

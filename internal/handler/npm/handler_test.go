@@ -151,7 +151,7 @@ func TestHandler_TarballPassthrough(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/lodash/-/lodash-4.17.21.tgz", nil)
 	w := httptest.NewRecorder()
@@ -172,7 +172,7 @@ func TestHandler_Upstream404(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -201,7 +201,7 @@ func TestHandler_AllVersionsAllowed(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/test-pkg", nil)
 	w := httptest.NewRecorder()
@@ -245,7 +245,7 @@ func TestHandler_DeprecatedVersionFiltered(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyDeprecatedRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/test-pkg", nil)
 	w := httptest.NewRecorder()
@@ -298,7 +298,7 @@ func TestHandler_MaliciousPackageFiltered(t *testing.T) {
 		ID: "MAL-2024-001", Severity: "critical", IsMalicious: true,
 	})
 
-	h := NewHandler(upstream.URL, engine, vulnDB, slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, vulnDB, slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/evil-pkg", nil)
 	w := httptest.NewRecorder()
@@ -328,7 +328,7 @@ func TestHandler_NoVersionsKey(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/pkg", nil)
 	w := httptest.NewRecorder()
@@ -341,7 +341,7 @@ func TestHandler_NoVersionsKey(t *testing.T) {
 
 func TestNewHandler_TrimsTrailingSlash(t *testing.T) {
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler("https://registry.npmjs.org/", engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler("https://registry.npmjs.org/", engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	if h.upstream.BaseURL != "https://registry.npmjs.org" {
 		t.Errorf("expected trimmed upstream, got %s", h.upstream.BaseURL)

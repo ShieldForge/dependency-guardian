@@ -21,6 +21,7 @@ import (
 	"dependency-guardian/internal/handler/upstream"
 	"dependency-guardian/internal/policy"
 	"dependency-guardian/internal/registry"
+	"dependency-guardian/internal/rewrite"
 )
 
 // Handler processes PyPI registry requests.
@@ -30,16 +31,18 @@ type Handler struct {
 	vulnDB   registry.VulnerabilityDB
 	logger   *slog.Logger
 	recorder decisions.Recorder
+	rewriter *rewrite.Engine
 }
 
 // NewHandler creates a new PyPI proxy handler.
-func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder) *Handler {
+func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder, rewriter *rewrite.Engine) *Handler {
 	return &Handler{
 		upstream: upstream.NewClient(strings.TrimRight(upstreamURL, "/"), 30*time.Second),
 		engine:   engine,
 		vulnDB:   vulnDB,
 		logger:   logger.With("handler", "pypi"),
 		recorder: recorder,
+		rewriter: rewriter,
 	}
 }
 
@@ -124,6 +127,23 @@ func (h *Handler) filterMetadata(ctx context.Context, body []byte) ([]byte, erro
 	var removed []string
 
 	for ver, files := range releases {
+		// Check rewrite rules before policy evaluation.
+		if h.rewriter != nil {
+			rr := h.rewriter.Apply("pypi", pkgName, ver)
+			if rr.Matched && rr.Version != ver {
+				if _, targetExists := releases[rr.Version]; targetExists {
+					h.logger.Info("version rewritten",
+						"package", pkgName,
+						"from", ver,
+						"to", rr.Version,
+					)
+					delete(releases, ver)
+					removed = append(removed, ver)
+					continue
+				}
+			}
+		}
+
 		publishedAt := extractPyPIPublishTime(files)
 		yanked := isYanked(files)
 

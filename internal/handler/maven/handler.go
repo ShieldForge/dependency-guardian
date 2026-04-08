@@ -24,6 +24,7 @@ import (
 	"dependency-guardian/internal/handler/upstream"
 	"dependency-guardian/internal/policy"
 	"dependency-guardian/internal/registry"
+	"dependency-guardian/internal/rewrite"
 )
 
 // Handler processes Maven repository requests.
@@ -33,6 +34,7 @@ type Handler struct {
 	vulnDB   registry.VulnerabilityDB
 	logger   *slog.Logger
 	recorder decisions.Recorder
+	rewriter *rewrite.Engine
 }
 
 // mavenMetadata represents the maven-metadata.xml structure.
@@ -57,13 +59,14 @@ type mavenVersionList struct {
 }
 
 // NewHandler creates a new Maven proxy handler.
-func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder) *Handler {
+func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder, rewriter *rewrite.Engine) *Handler {
 	return &Handler{
 		upstream: upstream.NewClient(strings.TrimRight(upstreamURL, "/"), 30*time.Second),
 		engine:   engine,
 		vulnDB:   vulnDB,
 		logger:   logger.With("handler", "maven"),
 		recorder: recorder,
+		rewriter: rewriter,
 	}
 }
 
@@ -131,9 +134,33 @@ func (h *Handler) filterMetadata(ctx context.Context, body []byte) ([]byte, erro
 	// Build the Maven coordinate: groupId:artifactId
 	pkgName := mavenCoordinate(meta.GroupID, meta.ArtifactID)
 
+	// Apply rewrite rules: build a set of versions to skip.
+	rewrittenAway := make(map[string]bool)
+	if h.rewriter != nil {
+		versionSet := make(map[string]bool, len(meta.Versioning.Versions.Version))
+		for _, v := range meta.Versioning.Versions.Version {
+			versionSet[v] = true
+		}
+		for _, ver := range meta.Versioning.Versions.Version {
+			rr := h.rewriter.Apply("maven", pkgName, ver)
+			if rr.Matched && rr.Version != ver && versionSet[rr.Version] {
+				h.logger.Info("version rewritten",
+					"package", pkgName,
+					"from", ver,
+					"to", rr.Version,
+				)
+				rewrittenAway[ver] = true
+			}
+		}
+	}
+
 	var allowed []string
 
 	for _, ver := range meta.Versioning.Versions.Version {
+		if rewrittenAway[ver] {
+			continue
+		}
+
 		pv := registry.PackageVersion{
 			Name:      pkgName,
 			Version:   ver,

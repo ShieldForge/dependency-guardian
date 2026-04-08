@@ -24,6 +24,7 @@ import (
 	"dependency-guardian/internal/handler/upstream"
 	"dependency-guardian/internal/policy"
 	"dependency-guardian/internal/registry"
+	"dependency-guardian/internal/rewrite"
 )
 
 // Handler processes Go module proxy requests.
@@ -33,6 +34,7 @@ type Handler struct {
 	vulnDB   registry.VulnerabilityDB
 	logger   *slog.Logger
 	recorder decisions.Recorder
+	rewriter *rewrite.Engine
 }
 
 // versionInfo is the JSON structure returned by @v/<ver>.info and @latest.
@@ -42,13 +44,14 @@ type versionInfo struct {
 }
 
 // NewHandler creates a new Go module proxy handler.
-func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder) *Handler {
+func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder, rewriter *rewrite.Engine) *Handler {
 	return &Handler{
 		upstream: upstream.NewClient(strings.TrimRight(upstreamURL, "/"), 30*time.Second),
 		engine:   engine,
 		vulnDB:   vulnDB,
 		logger:   logger.With("handler", "gomod"),
 		recorder: recorder,
+		rewriter: rewriter,
 	}
 }
 
@@ -97,11 +100,40 @@ func (h *Handler) handleVersionList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read all versions from the text response.
-	var allowed []string
+	var allVersions []string
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		ver := strings.TrimSpace(scanner.Text())
 		if ver == "" {
+			continue
+		}
+		allVersions = append(allVersions, ver)
+	}
+
+	// Apply rewrite rules: remove versions that are rewritten to a different
+	// version that also exists in the list.
+	rewrittenAway := make(map[string]bool)
+	if h.rewriter != nil {
+		versionSet := make(map[string]bool, len(allVersions))
+		for _, v := range allVersions {
+			versionSet[v] = true
+		}
+		for _, ver := range allVersions {
+			rr := h.rewriter.Apply("go", modulePath, ver)
+			if rr.Matched && rr.Version != ver && versionSet[rr.Version] {
+				h.logger.Info("version rewritten",
+					"module", modulePath,
+					"from", ver,
+					"to", rr.Version,
+				)
+				rewrittenAway[ver] = true
+			}
+		}
+	}
+
+	var allowed []string
+	for _, ver := range allVersions {
+		if rewrittenAway[ver] {
 			continue
 		}
 
@@ -178,6 +210,26 @@ func (h *Handler) handleVersionInfo(w http.ResponseWriter, r *http.Request) {
 	modulePath := path[1:atV] // strip leading /
 	versionFile := path[atV+4:]
 	ver := strings.TrimSuffix(versionFile, ".info")
+
+	// Apply rewrite rules to the requested version.
+	if h.rewriter != nil {
+		rr := h.rewriter.Apply("go", modulePath, ver)
+		if rr.Matched && rr.Version != ver {
+			h.logger.Info("version rewritten",
+				"module", modulePath,
+				"from", ver,
+				"to", rr.Version,
+			)
+			if rr.Mode == "redirect" {
+				newPath := fmt.Sprintf("/%s/@v/%s.info", modulePath, rr.Version)
+				http.Redirect(w, r, newPath, http.StatusFound)
+				return
+			}
+			// Transparent mode: fetch the rewritten version instead.
+			ver = rr.Version
+			path = fmt.Sprintf("/%s/@v/%s.info", modulePath, ver)
+		}
+	}
 
 	body, statusCode, err := h.upstream.Fetch(r, path)
 	if err != nil {
