@@ -182,7 +182,7 @@ func TestHandler_SimpleAPIPassthrough(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/simple/requests/", nil)
 	w := httptest.NewRecorder()
@@ -204,7 +204,7 @@ func TestHandler_PackageDownloadPassthrough(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/packages/requests-2.28.0.tar.gz", nil)
 	w := httptest.NewRecorder()
@@ -239,7 +239,7 @@ func TestHandler_AllReleasesAllowed(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/pypi/requests/json", nil)
 	w := httptest.NewRecorder()
@@ -282,7 +282,7 @@ func TestHandler_YankedVersionFiltered(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyYankedRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/pypi/test-pkg/json", nil)
 	w := httptest.NewRecorder()
@@ -336,7 +336,7 @@ func TestHandler_MaliciousPyPIPackage(t *testing.T) {
 		ID: "MAL-2024-001", IsMalicious: true,
 	})
 
-	h := NewHandler(upstream.URL, engine, vulnDB, slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, vulnDB, slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/pypi/evil-pkg/json", nil)
 	w := httptest.NewRecorder()
@@ -362,7 +362,7 @@ func TestHandler_Upstream404(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/pypi/nonexistent/json", nil)
 	w := httptest.NewRecorder()
@@ -386,7 +386,7 @@ func TestHandler_NoReleasesKey(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/pypi/test/json", nil)
 	w := httptest.NewRecorder()
@@ -399,12 +399,12 @@ func TestHandler_NoReleasesKey(t *testing.T) {
 
 func TestNewHandler_TrimsTrailingSlash(t *testing.T) {
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler("https://pypi.org/", engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler("https://pypi.org/", engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
-	if h.upstream.BaseURL != "https://pypi.org" {
-		t.Errorf("expected trimmed upstream, got %s", h.upstream.BaseURL)
+	if h.Upstream.BaseURL != "https://pypi.org" {
+		t.Errorf("expected trimmed upstream, got %s", h.Upstream.BaseURL)
 	}
-	if h.upstream.HTTPClient.Timeout != 30*time.Second {
-		t.Errorf("expected 30s timeout, got %v", h.upstream.HTTPClient.Timeout)
+	if h.Upstream.HTTPClient.Timeout != 30*time.Second {
+		t.Errorf("expected 30s timeout, got %v", h.Upstream.HTTPClient.Timeout)
 	}
 }

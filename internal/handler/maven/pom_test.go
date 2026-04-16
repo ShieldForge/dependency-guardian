@@ -573,7 +573,7 @@ func TestHandler_POM_Passthrough(t *testing.T) {
 	defer upstreamSrv.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	handler := NewHandler(upstreamSrv.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	handler := NewHandler(upstreamSrv.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/org/example/mylib/1.0.0/mylib-1.0.0.pom", nil)
 	w := httptest.NewRecorder()
@@ -632,7 +632,7 @@ func TestHandler_POM_WithParentResolution(t *testing.T) {
 	defer upstreamSrv.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	handler := NewHandler(upstreamSrv.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	handler := NewHandler(upstreamSrv.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/org/example/child/2.0.0/child-2.0.0.pom", nil)
 	w := httptest.NewRecorder()
@@ -673,7 +673,7 @@ func TestHandler_POM_DeniedDependencyLogged(t *testing.T) {
 
 	// Use a recorder to verify the denied dependency is recorded.
 	rec := &mockRecorder{}
-	handler := NewHandler(upstreamSrv.URL, engine, mockVuln, slog.Default(), rec)
+	handler := NewHandler(upstreamSrv.URL, engine, mockVuln, slog.Default(), rec, nil)
 
 	req := httptest.NewRequest("GET", "/org/example/mylib/1.0.0/mylib-1.0.0.pom", nil)
 	w := httptest.NewRecorder()

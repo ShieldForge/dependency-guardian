@@ -20,6 +20,7 @@ import (
 	"dependency-guardian/internal/handler/pypi"
 	"dependency-guardian/internal/policy"
 	"dependency-guardian/internal/registry"
+	"dependency-guardian/internal/rewrite"
 	"dependency-guardian/internal/vulndb"
 	"dependency-guardian/internal/vulndb/dal"
 	"dependency-guardian/internal/vulndb/models"
@@ -121,10 +122,17 @@ func (s *Server) registerHandlers() {
 		recorder = s.decisionLog
 	}
 
-	s.npmHandler = npm.NewHandler(s.cfg.Upstreams.NPM, s.engine, s.vulnDB, s.logger, recorder)
-	s.pypiHandler = pypi.NewHandler(s.cfg.Upstreams.PyPI, s.engine, s.vulnDB, s.logger, recorder)
-	s.goHandler = gomod.NewHandler(s.cfg.Upstreams.Go, s.engine, s.vulnDB, s.logger, recorder)
-	s.mavenHandler = maven.NewHandler(s.cfg.Upstreams.Maven, s.engine, s.vulnDB, s.logger, recorder)
+	// Create the rewrite engine if rules are configured.
+	var rewriter *rewrite.Engine
+	if len(s.cfg.Rewrites.Rules) > 0 {
+		rewriter = rewrite.New(s.cfg.Rewrites.Rules, s.logger)
+		s.logger.Info("rewrite engine enabled", "rules", len(s.cfg.Rewrites.Rules))
+	}
+
+	s.npmHandler = npm.NewHandler(s.cfg.Upstreams.NPM, s.engine, s.vulnDB, s.logger, recorder, rewriter)
+	s.pypiHandler = pypi.NewHandler(s.cfg.Upstreams.PyPI, s.engine, s.vulnDB, s.logger, recorder, rewriter)
+	s.goHandler = gomod.NewHandler(s.cfg.Upstreams.Go, s.engine, s.vulnDB, s.logger, recorder, rewriter)
+	s.mavenHandler = maven.NewHandler(s.cfg.Upstreams.Maven, s.engine, s.vulnDB, s.logger, recorder, rewriter)
 
 	// Explicit path-prefix routes (highest priority).
 	s.mux.Handle("/npm/", http.StripPrefix("/npm", s.npmHandler))

@@ -66,7 +66,7 @@ func TestHandler_VersionList_AllAllowed(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/github.com/pkg/errors/@v/list", nil)
 	w := httptest.NewRecorder()
@@ -90,7 +90,7 @@ func TestHandler_VersionList_SomeFiltered(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/github.com/pkg/errors/@v/list", nil)
 	w := httptest.NewRecorder()
@@ -120,7 +120,7 @@ func TestHandler_Latest_Allowed(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/github.com/pkg/errors/@latest", nil)
 	w := httptest.NewRecorder()
@@ -151,7 +151,7 @@ func TestHandler_Latest_Denied(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/github.com/pkg/errors/@latest", nil)
 	w := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func TestHandler_VersionInfo_Allowed(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/github.com/pkg/errors/@v/v1.0.0.info", nil)
 	w := httptest.NewRecorder()
@@ -201,7 +201,7 @@ func TestHandler_VersionInfo_Denied(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/github.com/pkg/errors/@v/v1.0.0.info", nil)
 	w := httptest.NewRecorder()
@@ -220,7 +220,7 @@ func TestHandler_ModFile_Passthrough(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyAllRego) // policy denied, but .mod passthrough
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/example.com/mod/@v/v1.0.0.mod", nil)
 	w := httptest.NewRecorder()
@@ -242,7 +242,7 @@ func TestHandler_ZipFile_Passthrough(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, denyAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/example.com/mod/@v/v1.0.0.zip", nil)
 	w := httptest.NewRecorder()
@@ -260,7 +260,7 @@ func TestHandler_Upstream404(t *testing.T) {
 	defer upstream.Close()
 
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/nonexistent/@v/list", nil)
 	w := httptest.NewRecorder()
@@ -284,7 +284,7 @@ func TestHandler_MaliciousVersionFiltered(t *testing.T) {
 		ID: "MAL-2024-001", IsMalicious: true,
 	})
 
-	h := NewHandler(upstream.URL, engine, vulnDB, slog.Default(), nil)
+	h := NewHandler(upstream.URL, engine, vulnDB, slog.Default(), nil, nil)
 
 	req := httptest.NewRequest("GET", "/github.com/evil/mod/@v/list", nil)
 	w := httptest.NewRecorder()
@@ -304,12 +304,12 @@ func TestHandler_MaliciousVersionFiltered(t *testing.T) {
 
 func TestNewHandler_TrimsTrailingSlash(t *testing.T) {
 	engine := testutil.MakePolicyEngine(t, testutil.AllowAllRego)
-	h := NewHandler("https://proxy.golang.org/", engine, testutil.NewMockVulnDB(), slog.Default(), nil)
+	h := NewHandler("https://proxy.golang.org/", engine, testutil.NewMockVulnDB(), slog.Default(), nil, nil)
 
-	if h.upstream.BaseURL != "https://proxy.golang.org" {
-		t.Errorf("expected trimmed upstream, got %s", h.upstream.BaseURL)
+	if h.Upstream.BaseURL != "https://proxy.golang.org" {
+		t.Errorf("expected trimmed upstream, got %s", h.Upstream.BaseURL)
 	}
-	if h.upstream.HTTPClient.Timeout != 30*time.Second {
-		t.Errorf("expected 30s timeout, got %v", h.upstream.HTTPClient.Timeout)
+	if h.Upstream.HTTPClient.Timeout != 30*time.Second {
+		t.Errorf("expected 30s timeout, got %v", h.Upstream.HTTPClient.Timeout)
 	}
 }

@@ -18,21 +18,17 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"dependency-guardian/internal/decisions"
-	"dependency-guardian/internal/handler/upstream"
+	"dependency-guardian/internal/handler"
 	"dependency-guardian/internal/policy"
 	"dependency-guardian/internal/registry"
+	"dependency-guardian/internal/rewrite"
 )
 
 // Handler processes Maven repository requests.
 type Handler struct {
-	upstream *upstream.Client
-	engine   *policy.Engine
-	vulnDB   registry.VulnerabilityDB
-	logger   *slog.Logger
-	recorder decisions.Recorder
+	handler.Base
 }
 
 // mavenMetadata represents the maven-metadata.xml structure.
@@ -57,13 +53,9 @@ type mavenVersionList struct {
 }
 
 // NewHandler creates a new Maven proxy handler.
-func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder) *Handler {
+func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder, rewriter *rewrite.Engine) *Handler {
 	return &Handler{
-		upstream: upstream.NewClient(strings.TrimRight(upstreamURL, "/"), 30*time.Second),
-		engine:   engine,
-		vulnDB:   vulnDB,
-		logger:   logger.With("handler", "maven"),
-		recorder: recorder,
+		Base: handler.NewBase(upstreamURL, engine, vulnDB, logger, recorder, rewriter, "maven"),
 	}
 }
 
@@ -83,7 +75,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Artifact files (jar, war, aar, checksums, signatures) –
 	// pass through unmodified.
-	h.upstream.Passthrough(w, r)
+	h.Upstream.Passthrough(w, r)
 }
 
 // handleMetadata fetches maven-metadata.xml from upstream, filters
@@ -91,9 +83,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleMetadata(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	body, statusCode, err := h.upstream.Fetch(r, r.URL.Path)
+	body, statusCode, err := h.Upstream.Fetch(r, r.URL.Path)
 	if err != nil {
-		h.logger.Error("upstream request failed", "path", r.URL.Path, "error", err)
+		h.Logger.Error("upstream request failed", "path", r.URL.Path, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
@@ -106,7 +98,7 @@ func (h *Handler) handleMetadata(w http.ResponseWriter, r *http.Request) {
 
 	filtered, err := h.filterMetadata(ctx, body)
 	if err != nil {
-		h.logger.Error("filtering metadata failed", "error", err)
+		h.Logger.Error("filtering metadata failed", "error", err)
 		http.Error(w, "policy evaluation failed", http.StatusInternalServerError)
 		return
 	}
@@ -131,42 +123,46 @@ func (h *Handler) filterMetadata(ctx context.Context, body []byte) ([]byte, erro
 	// Build the Maven coordinate: groupId:artifactId
 	pkgName := mavenCoordinate(meta.GroupID, meta.ArtifactID)
 
+	// Apply rewrite rules: build a set of versions to skip.
+	rewrittenAway := make(map[string]bool)
+	if h.Rewriter != nil {
+		versionSet := make(map[string]bool, len(meta.Versioning.Versions.Version))
+		for _, v := range meta.Versioning.Versions.Version {
+			versionSet[v] = true
+		}
+		for _, ver := range meta.Versioning.Versions.Version {
+			rr := h.Rewriter.Apply("maven", pkgName, ver)
+			if rr.Matched && rr.Version != ver && versionSet[rr.Version] {
+				h.Logger.Info("version rewritten",
+					"package", pkgName,
+					"from", ver,
+					"to", rr.Version,
+				)
+				rewrittenAway[ver] = true
+			}
+		}
+	}
+
 	var allowed []string
 
 	for _, ver := range meta.Versioning.Versions.Version {
+		if rewrittenAway[ver] {
+			continue
+		}
+
 		pv := registry.PackageVersion{
 			Name:      pkgName,
 			Version:   ver,
 			Ecosystem: registry.EcosystemMaven,
 		}
 
-		vulns, err := h.vulnDB.GetVulnerabilities(ctx, registry.EcosystemMaven, pkgName, ver)
-		if err != nil {
-			h.logger.Warn("vulnerability lookup failed", "package", pkgName, "version", ver, "error", err)
-		}
-
-		input := registry.PolicyInput{
-			Package:         pv,
-			Vulnerabilities: vulns,
-		}
-
-		result, err := h.engine.Evaluate(ctx, input)
+		result, err := h.EvaluateVersion(ctx, pv)
 		if err != nil {
 			return nil, fmt.Errorf("evaluating policy for %s@%s: %w", pkgName, ver, err)
 		}
 
-		if h.recorder != nil {
-			h.recorder.Record("maven", pkgName, ver, result.Allowed, result.Reasons, len(vulns))
-		}
-
 		if result.Allowed {
 			allowed = append(allowed, ver)
-		} else {
-			h.logger.Info("version denied by policy",
-				"package", pkgName,
-				"version", ver,
-				"reasons", result.Reasons,
-			)
 		}
 	}
 
@@ -236,9 +232,9 @@ func ExtractGroupAndArtifact(path string) (groupID, artifactID string) {
 func (h *Handler) handlePom(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	body, statusCode, err := h.upstream.Fetch(r, r.URL.Path)
+	body, statusCode, err := h.Upstream.Fetch(r, r.URL.Path)
 	if err != nil {
-		h.logger.Error("upstream POM fetch failed", "path", r.URL.Path, "error", err)
+		h.Logger.Error("upstream POM fetch failed", "path", r.URL.Path, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
@@ -264,11 +260,11 @@ func (h *Handler) handlePom(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) inspectPOM(ctx context.Context, data []byte) {
 	pom, err := parsePOM(data)
 	if err != nil {
-		h.logger.Warn("failed to parse POM for inspection", "error", err)
+		h.Logger.Warn("failed to parse POM for inspection", "error", err)
 		return
 	}
 
-	props := collectProperties(ctx, pom, h.upstream)
+	props := collectProperties(ctx, pom, h.Upstream)
 	deps := resolvedDependencies(pom, props)
 
 	for _, dep := range deps {
@@ -280,34 +276,10 @@ func (h *Handler) inspectPOM(ctx context.Context, data []byte) {
 			Ecosystem: registry.EcosystemMaven,
 		}
 
-		vulns, err := h.vulnDB.GetVulnerabilities(ctx, registry.EcosystemMaven, pkgName, dep.Version)
-		if err != nil {
-			h.logger.Warn("vulnerability lookup failed for POM dependency",
-				"package", pkgName, "version", dep.Version, "error", err)
-		}
-
-		input := registry.PolicyInput{
-			Package:         pv,
-			Vulnerabilities: vulns,
-		}
-
-		result, err := h.engine.Evaluate(ctx, input)
-		if err != nil {
-			h.logger.Warn("policy evaluation failed for POM dependency",
+		if _, err := h.EvaluateVersion(ctx, pv); err != nil {
+			h.Logger.Warn("policy evaluation failed for POM dependency",
 				"package", pkgName, "version", dep.Version, "error", err)
 			continue
-		}
-
-		if h.recorder != nil {
-			h.recorder.Record("maven", pkgName, dep.Version, result.Allowed, result.Reasons, len(vulns))
-		}
-
-		if !result.Allowed {
-			h.logger.Warn("POM dependency denied by policy",
-				"package", pkgName,
-				"version", dep.Version,
-				"reasons", result.Reasons,
-			)
 		}
 	}
 }

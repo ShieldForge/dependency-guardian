@@ -18,28 +18,21 @@ import (
 	"time"
 
 	"dependency-guardian/internal/decisions"
-	"dependency-guardian/internal/handler/upstream"
+	"dependency-guardian/internal/handler"
 	"dependency-guardian/internal/policy"
 	"dependency-guardian/internal/registry"
+	"dependency-guardian/internal/rewrite"
 )
 
 // Handler processes npm registry requests.
 type Handler struct {
-	upstream *upstream.Client
-	engine   *policy.Engine
-	vulnDB   registry.VulnerabilityDB
-	logger   *slog.Logger
-	recorder decisions.Recorder
+	handler.Base
 }
 
 // NewHandler creates a new npm proxy handler.
-func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder) *Handler {
+func NewHandler(upstreamURL string, engine *policy.Engine, vulnDB registry.VulnerabilityDB, logger *slog.Logger, recorder decisions.Recorder, rewriter *rewrite.Engine) *Handler {
 	return &Handler{
-		upstream: upstream.NewClient(strings.TrimRight(upstreamURL, "/"), 30*time.Second),
-		engine:   engine,
-		vulnDB:   vulnDB,
-		logger:   logger.With("handler", "npm"),
-		recorder: recorder,
+		Base: handler.NewBase(upstreamURL, engine, vulnDB, logger, recorder, rewriter, "npm"),
 	}
 }
 
@@ -49,7 +42,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Tarball downloads are proxied through without filtering.
 	if isTarballRequest(path) {
-		h.upstream.Passthrough(w, r)
+		h.Upstream.Passthrough(w, r)
 		return
 	}
 
@@ -62,7 +55,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleMetadata(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	upstreamURL := h.upstream.BaseURL + r.URL.Path
+	upstreamURL := h.Upstream.BaseURL + r.URL.Path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
 		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
@@ -71,9 +64,9 @@ func (h *Handler) handleMetadata(w http.ResponseWriter, r *http.Request) {
 	// npm clients send Accept: application/json or abbreviated metadata headers.
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := h.upstream.HTTPClient.Do(req)
+	resp, err := h.Upstream.HTTPClient.Do(req)
 	if err != nil {
-		h.logger.Error("upstream request failed", "url", upstreamURL, "error", err)
+		h.Logger.Error("upstream request failed", "url", upstreamURL, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
@@ -93,7 +86,7 @@ func (h *Handler) handleMetadata(w http.ResponseWriter, r *http.Request) {
 
 	filtered, err := h.filterMetadata(ctx, body)
 	if err != nil {
-		h.logger.Error("filtering metadata failed", "error", err)
+		h.Logger.Error("filtering metadata failed", "error", err)
 		http.Error(w, "policy evaluation failed", http.StatusInternalServerError)
 		return
 	}
@@ -125,6 +118,23 @@ func (h *Handler) filterMetadata(ctx context.Context, body []byte) ([]byte, erro
 	var removed []string
 
 	for ver := range versions {
+		// Check rewrite rules before policy evaluation.
+		if h.Rewriter != nil {
+			rr := h.Rewriter.Apply("npm", pkgName, ver)
+			if rr.Matched && rr.Version != ver {
+				if _, targetExists := versions[rr.Version]; targetExists {
+					h.Logger.Info("version rewritten",
+						"package", pkgName,
+						"from", ver,
+						"to", rr.Version,
+					)
+					delete(versions, ver)
+					removed = append(removed, ver)
+					continue
+				}
+			}
+		}
+
 		publishedAt := extractPublishTime(timesMap, ver)
 
 		pv := registry.PackageVersion{
@@ -135,31 +145,12 @@ func (h *Handler) filterMetadata(ctx context.Context, body []byte) ([]byte, erro
 			Deprecated:  isDeprecated(versions[ver]),
 		}
 
-		vulns, err := h.vulnDB.GetVulnerabilities(ctx, registry.EcosystemNPM, pkgName, ver)
-		if err != nil {
-			h.logger.Warn("vulnerability lookup failed", "package", pkgName, "version", ver, "error", err)
-		}
-
-		input := registry.PolicyInput{
-			Package:         pv,
-			Vulnerabilities: vulns,
-		}
-
-		result, err := h.engine.Evaluate(ctx, input)
+		result, err := h.EvaluateVersion(ctx, pv)
 		if err != nil {
 			return nil, fmt.Errorf("evaluating policy for %s@%s: %w", pkgName, ver, err)
 		}
 
-		if h.recorder != nil {
-			h.recorder.Record("npm", pkgName, ver, result.Allowed, result.Reasons, len(vulns))
-		}
-
 		if !result.Allowed {
-			h.logger.Info("version denied by policy",
-				"package", pkgName,
-				"version", ver,
-				"reasons", result.Reasons,
-			)
 			delete(versions, ver)
 			removed = append(removed, ver)
 		}
